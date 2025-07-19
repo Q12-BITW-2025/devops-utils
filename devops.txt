@@ -1,0 +1,228 @@
+KRAKEN_SYMBOLS: XBT/USD,XBT/USDT
+BINANCE_SYMBOLS: BTCUSDT, BTCBRL
+COINBASE_SYMBOLS: BTC-USD,BTC-USDT
+
+#aws shell helm installation
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+aws eks update-nodegroup-config --cluster-name q12-PoC-cluster --nodegroup-name q12-PoC-ng --scaling-config minSize=6,maxSize=6,desiredSize=6
+
+aws ecr create-repository --repository-name poc-go-md-listener --region us-east-1
+
+docker build -t poc-go-md-listener:latest .
+
+docker tag poc-go-md-listener:latest 512979937293.dkr.ecr.us-east-1.amazonaws.com/poc-go-md-listener:latest
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 512979937293.dkr.ecr.us-east-1.amazonaws.com
+docker push 512979937293.dkr.ecr.us-east-1.amazonaws.com/poc-go-md-listener:latest
+
+aws eks --region us-east-1 update-kubeconfig --name q12-PoC-cluster
+
+#INSTALL EBS SCSI
+eksctl utils associate-iam-oidc-provider --region us-east-1 --cluster q12-PoC-cluster --approve
+#--> to get role: aws iam list-roles | grep q12-PoC-cluster
+## I leave the role created so no need to run the iamserviceaccount creation step...
+eksctl create iamserviceaccount --name ebs-csi-controller-sa --namespace kube-system --cluster q12-PoC-cluster --attach-policy-arn arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy --approve --override-existing-serviceaccounts
+eksctl update addon --name aws-ebs-csi-driver --cluster q12-PoC-cluster --service-account-role-arn arn:aws:iam::512979937293:role/eksctl-q12-PoC-cluster-addon-iamserviceaccoun-Role1-uzPTXqBlZl4T --region us-east-1
+
+
+
+
+
+
+kubectl create namespace http-router
+kubectl apply -f .\kube\deployment.yaml
+kubectl apply -f .\kube\service.yaml
+kubectl port-forward pod/poc-py-odigos-557b659b99-t86w4 8080:8080 -n http-router
+//replace pod name...
+
+
+
+kubectl create namespace market-data
+kubectl apply -f .\kube\deployment.yml
+kubectl apply -f .\kube\service.yml
+kubectl rollout status deployment/poc-go-md-listener -n market-data
+
+kubectl logs -f poc-go-md-listener-binance-79cb7d475-698zq -c poc-go-md-listener-binance -n market-data
+ 
+ 
+ 
+cluster-name 
+ aws eks list-clusters --region <your-region>
+ 
+helm repo add cilium https://helm.cilium.io/
+helm repo add odigos https://odigos-io.github.io/odigos/
+helm repo add bitnami https://charts.bitnami.com/bitnami
+helm repo update
+
+ 
+ # from any machine with kubectl access
+ 
+cilium install \
+  --version 1.17.5 \
+  --set cluster.name="q12-poc-cluster" \
+  --set kubeProxyReplacement=true \
+  --set hostServices.enabled=true \
+  --set nodeinit.enabled=true \
+  --set cni.chainingMode=none \
+  --set dnsProxy.enabled=true \
+  --set dnsProxy.autoDirectResponse=true \
+  --set dnsProxy.upstreamResolvers={172.20.0.10,10.0.0.2} \
+  --set ipam.mode=eni \
+  --set eni.enabled=true \
+  --set ebpf.enabled=true \
+  --set monitor.enabled=true \
+  --set hubble.enabled=true \
+  --set hubble.relay.enabled=true \
+  --set hubble.peerService.enabled=true \
+  --set hubble.peerService.namespace="kube-system" \
+  --set hubble.peerService.name="hubble-peer" \
+  --set hubble.peerService.clusterIP="None" \
+  --set hubble.peerService.port=4244 \
+  --set hubble.peerService.targetPort=4244 \
+  --set hubble.peerService.internalTrafficPolicy="Cluster" \
+  --set hubble.ui.enabled=true \
+  --set hubble.ui.service.type=LoadBalancer \
+  --set hubble.ui.service.loadBalancerSourceRanges={0.0.0.0/0} \
+  --set "hubble.metrics.enabled={dns,drop,tcp,flow,http,icmp,port-distribution}" \
+  --set prometheus.enabled=true \
+  --set-string extraConfig.dns-proxy-auto-direct-response="true"
+
+  
+helm upgrade --install odigos odigos/odigos \
+  --namespace odigos-system \
+  --create-namespace \
+  --set rbac.create=true \
+  --set controllerManager.logLevel=debug \
+  --set scheduler.logLevel=debug \
+  --set ui.enabled=true \
+  --set cloudDetector.enabled=true \
+  --set extraManifests[0].apiVersion="odigos.io/v1alpha1" \
+  --set extraManifests[0].kind="Destination" \
+  --set extraManifests[0].metadata.name="tempo-destination" \
+  --set extraManifests[0].metadata.namespace="odigos-system" \
+  --set extraManifests[0].spec.type="tempo" \
+  --set extraManifests[0].spec.data.endpoint="tempo-distributor.observability.svc.cluster.local:4317" \
+  --set extraManifests[1].apiVersion="odigos.io/v1alpha1" \
+  --set extraManifests[1].kind="WorkloadSource" \
+  --set extraManifests[1].metadata.name="source-everything" \
+  --set extraManifests[1].metadata.namespace="odigos-system" \
+  --set extraManifests[1].spec.workload.kind="Namespace" \
+  --set extraManifests[1].spec.workload.name="*" \
+  --set extraManifests[1].spec.signals[0]="traces" \
+  --set extraManifests[1].spec.signals[1]="metrics" \
+  --set extraManifests[1].spec.signals[2]="logs"
+  
+
+
+
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo add grafana https://grafana.github.io/helm-charts
+helm repo update
+
+## kubectl --namespace observability get secrets kube-prometheus-stack-grafana -o jsonpath="{.data.admin-password}" | base64 -d ; echo
+
+helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack --namespace observability --create-namespace
+helm upgrade --install tempo grafana/tempo-distributed --namespace observability --create-namespace
+helm upgrade --install loki grafana/loki-distributed --namespace observability --create-namespace
+  
+helm upgrade --install grafana grafana/grafana \
+  --namespace observability \
+  --create-namespace \
+  --set adminPassword='YourPassword' \
+  --set datasources."datasources\.yaml".apiVersion=1 \
+  --set datasources."datasources\.yaml".datasources[0].name=Prometheus \
+  --set datasources."datasources\.yaml".datasources[0].type=prometheus \
+  --set datasources."datasources\.yaml".datasources[0].url=http://kube-prometheus-stack-prometheus.observability.svc:9090 \
+  --set datasources."datasources\.yaml".datasources[0].isDefault=true \
+  --set datasources."datasources\.yaml".datasources[1].name=Tempo \
+  --set datasources."datasources\.yaml".datasources[1].type=tempo \
+  --set datasources."datasources\.yaml".datasources[1].url=http://tempo-query-frontend.observability.svc:3100 \
+  --set datasources."datasources\.yaml".datasources[2].name=Loki \
+  --set datasources."datasources\.yaml".datasources[2].type=loki \
+  --set datasources."datasources\.yaml".datasources[2].url=http://loki-query-frontend.observability.svc:3100
+
+helm upgrade --install kube-prometheus-stack prometheus-community/kube-prometheus-stack `
+  --namespace observability `
+  --create-namespace `
+  --set prometheus.prometheusSpec.additionalScrapeConfigs[0].job_name="cilium-agent" `
+  --set prometheus.prometheusSpec.additionalScrapeConfigs[0].static_configs[0].targets[0]="cilium-agent.kube-system.svc.cluster.local:9090" `
+  --set prometheus.prometheusSpec.additionalScrapeConfigs[1].job_name="hubble-relay" `
+  --set prometheus.prometheusSpec.additionalScrapeConfigs[1].static_configs[0].targets[0]="hubble-relay.kube-system.svc.cluster.local:9091"
+
+#Install Postgress
+helm upgrade --install market-data-postgresql bitnami/postgresql \
+  --namespace database \
+  --create-namespace \
+  --set auth.postgresPassword=super \
+  --set auth.username=marketdata \
+  --set auth.password=marketdata \
+  --set auth.database=marketdata \
+  --set primary.persistence.enabled=true \
+  --set primary.persistence.storageClass=gp2 \
+  --set primary.persistence.size=8Gi
+
+#Uninstall KAFKA 100% nuke
+helm uninstall kafka -n kafka || true && \
+kubectl delete statefulset --all -n kafka --force --grace-period=0 || true && \
+kubectl delete pvc --all -n kafka --force --grace-period=0 || true && \
+kubectl delete deployment --all -n kafka --force --grace-period=0 || true && \
+kubectl delete pods --all -n kafka --force --grace-period=0 || true && \
+kubectl get crds | grep -i kafka | awk '{print $1}' | xargs -r kubectl delete crd || true && \
+kubectl delete namespace kafka --force --grace-period=0 || true
+
+
+
+#Install kafka - spawns ebs...
+
+
+helm upgrade --install kafka bitnami/kafka \
+  --namespace kafka --create-namespace \
+  --set replicaCount=1 \
+  --set auth.enabled=false \
+  --set listeners.client.protocol=PLAINTEXT \
+  --set controller.persistence.enabled=true \
+  --set controller.persistence.size=10Gi \
+  --set controller.persistence.storageClass=gp2 \
+    --set broker.persistence.enabled=true \
+  --set broker.persistence.size=10Gi \
+  --set broker.persistence.storageClass=gp2  \
+  --set kafka.configurationOverrides."auto.create.topics.enable"=true
+
+#checking kafka status:
+kubectl get pods -A | grep kafka
+kubectl get pvc -A | grep kafka
+kubectl get statefulset -A | grep kafka
+kubectl get crds | grep -i kafka
+kubectl get namespace
+
+  
+#Creating a topic
+kubectl exec -it kafka-broker-0 -n kafka -- bash
+kafka-topics.sh \
+  --create \
+  --topic trade \
+  --bootstrap-server localhost:9092 \
+  --replication-factor 1 \
+  --partitions 1
+ 
+ 
+ 
+ ### poc-java-db-writer
+ 
+ aws ecr create-repository --repository-name poc-java-db-writer --region us-east-1
+ 
+docker build -t poc-java-db-writer:latest .
+
+docker tag poc-java-db-writer:latest 512979937293.dkr.ecr.us-east-1.amazonaws.com/poc-java-db-writer:latest
+aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 512979937293.dkr.ecr.us-east-1.amazonaws.com
+docker push 512979937293.dkr.ecr.us-east-1.amazonaws.com/poc-java-db-writer:latest
+
+kubectl create namespace db-writer
+kubectl apply -f .\kube\deployment.yaml
+kubectl apply -f .\kube\service.yaml
+
+
+#jaeger
+kubectl apply -f https://raw.githubusercontent.com/odigos-io/simple-demo/main/kubernetes/jaeger.yaml
+
+kubectl port-forward svc/jaeger -n tracing  16686:16686

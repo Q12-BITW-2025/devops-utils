@@ -1,0 +1,154 @@
+PURPOSE: This readme is to allow you to have AWS Service access via the command line for your sandbox.
+         As part of this it provides you with temporary access credentials.
+         This access is gained via the Sandbox Toolkit (pcl) and below are the instructions to get this.
+
+PRE-REQUISITES:
+- You have an RSA hard or soft token:
+- You are working off-network on your own personal machine
+- You have access to a command line tool - e.g. Git Bash
+
+
+STEP 1: Download the latest pcl Toolkit (via the AWS Console)
+- Login to the AWS Console via: https://idag2.jpmorganchase.com/adfs/ls/idpinitiatedsignon.aspx?logintorp=ASB
+- (Ensure that you are working off-prem)
+- (Ensure that you use your desktop password to login)
+- In the AWS Console browser, open a new tab
+- In this tab, open link: https://s3.console.aws.amazon.com/s3/buckets/l1-toolkit/?region=us-east-1&tab=overview
+- Download the appropriate toolkit zip file
+--- For Windows, pcl-..-windows-..-...zip
+--- For linux, pcl-..-linux-..-...zip
+--- For Mac, pcl-..-darwin-..-...zip
+- Unzip this file
+
+STEP 2: Run the pcl Toolkit
+- Launch your command line tool (e.g. git bash)
+- cd to the folder where you downloaded the pcl Toolkit
+- ./pcl aws --sandbox-user --domain <your-domain> --sid <your-sid>  (optional) --profile-name <new_profile>
+- INFO: Default profile name is 'adfs' - or you can be specific by appending '--profile-name <new-profile-name>''
+- Enter your desktop password
+- Enter your RSA token id
+- (Only for a new profile name AND you have access to multiple accounts) Select the account you wish to access
+
+- INFO: Successful access will generate temporary credentials into your .aws credentials file with a profile-named entry
+- INFO: These temporary credentials expire after 8 hours - simply run again to regenerate new temp credentials
+- INFO To set a particular profile name to be your default then set the environment variable: AWS_DEFAULT_PROFILE
+
+STEP 3: Run your aws cli commands/Use the temporary access key credentials
+- Example: Enter your aws cli commands - using --profile adfs (or set AWS_DEFAULT_PROFILE)
+- Example: aws s3 ls --profile adfs  (if AWS_DEFAULT_PROFILE is not set)
+
+STEP 4: For more help/options
+- ./pcl aws --help
+- ./pcl --help
+
+INFO: If you are using an IDE, you will need to set your session to use the AWS_DEFAULT_PROFILE also
+to ensure that you pick up the correct session token when running the code
+
+#AWS LINK:
+https://bit.ly/35KqkKb
+
+#odigos setup
+https://github.com/odigos-io/odigos/releases
+https://docs.odigos.io/setup/installation#community
+
+
+###
+ pcl aws --sandbox-user --domain naeast --sid r662402
+ ## IF POWERSHELL:
+$Env:AWS_PROFILE='adfs' 
+
+## setup kubeconfig to cluster...
+ aws eks --region us-east-1 update-kubeconfig --name q12-PoC-cluster
+
+## get context, text connectivity
+kubectl config current-context
+kubectl get nodes
+
+## Installing ODIGOS
+helm repo add odigos https://odigos-io.github.io/odigos/ 
+helm repo update
+helm upgrade --install odigos odigos/odigos --namespace odigos-system --create-namespace
+
+helm upgrade --install odigos-operator odigos/odigos-operator --namespace odigos-system --create-namespace --set rbac.create=true --set args="{--log-level=debug,--ebpf-enabled=true,--ebpf-capture-mode=full}"
+
+
+
+
+### Verifying if odigos DaemonSets are running
+kubectl get pods -n odigos-system
+kubectl get daemonset -n odigos-system
+#LINUX
+kubectl describe daemonset odiglet -n odigos-system | grep -E 'HostPath|privileged'
+#windowS
+kubectl describe daemonset odiglet -n odigos-system | Select-String -Pattern 'HostPath','privileged'
+#PRE-REQUISITES
+
+
+####Confirming if odigos ebpf is installed
+kubectl describe pod <your-app-pod> -n <app-ns> | Select-String LD_PRELOAD
+
+# After installing odigos on cluster, you can simply run odigos ui, review port you're using to not hit any running port on your os
+ odigos ui 
+ 
+ 
+ 
+ ## Creating ECR
+ aws ecr create-repository --repository-name poc-py-odigos --region us-east-1
+ ### log-in into ECR repo
+  aws ecr get-login-password --region us-east-1 | docker login --username AWS --password-stdin 512979937293.dkr.ecr.us-east-1.amazonaws.com
+ #### 
+	# Tag your local image for ECR
+	docker tag poc-py-odigos:latest 512979937293.dkr.ecr.us-east-1.amazonaws.com/poc-py-odigos:latest
+
+	# Push it up
+	docker push 512979937293.dkr.ecr.us-east-1.amazonaws.com/poc-py-odigos:latest
+
+	# get repositories for poc-py-odigos
+	aws ecr describe-repositories --repository-names poc-py-odigos --region us-east-1 --query 'repositories[0].repositoryUri' --output text
+ 
+	#kubectl delete pod poc-py-odigos-68fbc558f6-pgxvg --grace-period=0 --force
+	#kubectl logs -f poc-py-odigos-68ffc96f4-p2fwx -c poc-py-odigos
+	#kubectl logs -f  -c odigos-data-collection
+	odigos-data-collection-s2sx8
+	#kubectl describe pod poc-py-odigos-68fbc558f6-z26qg  -n <namespace>
+ 
+	#kubectl get nodes
+	#kubectl describe node ip-10-0-88-82.ec2.internal | grep -E "Capacity:|Allocatable:|pods"
+	
+	
+	#aws eks update-nodegroup-config --cluster-name q12-odigos-setup-cluster --nodegroup-name q12-odigos-setup-ng --scaling-config minSize=6,maxSize=6,desiredSize=6
+	
+	#open api to test
+	#https://www.postman.com/cs-demo/public-rest-apis/collection/tfzpqfc/public-rest-api
+	##https://pokeapi.co/api/v2/pokemon/charizard/
+	
+	#command to run a bash which curl setup inside kubernetes - for testing purboses...
+	kubectl run curl-debug --rm -i --tty --image=curlimages/curl --restart=Never -- sh
+	
+	
+	#associate iam-oidc-provider to odigos
+	eksctl utils associate-iam-oidc-provider --region=us-east-1 --cluster=q12-odigos-setup-cluster --approve
+	
+	
+	
+#DOCKER BUILD
+docker build -t poc-py-odigos:latest .
+docker tag poc-py-odigos:latest 512979937293.dkr.ecr.us-east-1.amazonaws.com/poc-py-odigos:latest
+docker push 512979937293.dkr.ecr.us-east-1.amazonaws.com/poc-py-odigos:latest
+
+
+#kubectl apply...
+kubectl apply -f .\kube\deployment.yaml
+kubectl rollout restart deployment poc-py-odigos
+
+
+#ODIGOS DEMO
+kubectl apply -f https://raw.githubusercontent.com/odigos-io/simple-demo/main/kubernetes/jaeger.yaml
+kubectl create namespace odigos-demo
+kubectl apply -n odigos-demo -f https://raw.githubusercontent.com/odigos-io/simple-demo/main/kubernetes/deployment.yaml
+
+
+#s3 buckets/l1-toolkit/s3 bucket: q12-odigos-poc
+import eks-1.30-odigos-setup-v1.8yml into cloudfront to spin-up infra
+
+
